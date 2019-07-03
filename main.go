@@ -1,16 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/storage"
 	tapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/mmcdole/gofeed"
 	log "github.com/sirupsen/logrus"
@@ -18,8 +20,7 @@ import (
 
 var (
 	APIToken = os.Getenv("TELEGRAM_TOKEN")
-
-	Port = os.Getenv("PORT")
+	Bucket   = os.Getenv("BUCKET")
 )
 
 func init() {
@@ -63,40 +64,55 @@ func main() {
 }
 
 type Server struct {
-	bot *tapi.BotAPI
+	Bot   *tapi.BotAPI
+	store *storage.Client
 
 	Feeds
 	Seens
 }
 
 func NewServer(token string) (*Server, error) {
+	fn := "rsssubsbot.json"
+	store, err := storage.NewClient(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("NewServer storage client")
+	}
+	r, err := store.Bucket(Bucket).Object(fn).NewReader(context.Background())
+	if err == nil {
+		s := &Server{}
+		err = json.NewDecoder(r).Decode(s)
+		if err == nil {
+			s.store = store
+			return s, nil
+		}
+		log.Debugln("NewServer decode", err)
+	}
+	log.Debugln("NewServer reader", err)
 	bot, err := tapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("NewServer new bot %v", err)
 	}
 	return &Server{
-		bot:   bot,
+		Bot:   bot,
+		store: store,
 		Feeds: NewFeeds(),
 		Seens: NewSeens(),
 	}, nil
 }
 
 func (s *Server) Export() {
+	log.Debugln("Exporting")
 	fn := "rsssubsbot.json"
-	b, err := json.Marshal(s)
+	w := s.store.Bucket(Bucket).Object(fn).NewWriter(context.Background())
+	err := json.NewEncoder(w).Encode(s)
 	if err != nil {
-		log.Errorln("Export marshal", err)
-		return
-	}
-	err = ioutil.WriteFile(fn, b, 0644)
-	if err != nil {
-		log.Errorln("Export write", fn, err)
+		log.Errorln("Export to bucket", err)
 	}
 }
 
 func (s *Server) Respond() {
 	log.Debugln("starting respond")
-	updates, err := s.bot.GetUpdatesChan(tapi.NewUpdate(0))
+	updates, err := s.Bot.GetUpdatesChan(tapi.NewUpdate(0))
 	if err != nil {
 		log.Fatal("Respond get updates", err)
 	}
@@ -112,18 +128,17 @@ func (s *Server) Respond() {
 		}
 
 		var txt string
-		switch ss[0] {
-		case "sub":
+		switch strings.ToLower(ss[0]) {
+		case "sub", "/sub", "subscribe", "/subscribe", "add", "/add":
 			if len(ss) < 2 {
 				txt = "Please provide a url to subscribe to"
 			} else {
-				txt = "Subscribed to " + ss[1]
-				err := s.Feeds.Add(ss[1], update.Message.Chat.ID)
-				if err != nil {
-					txt = "Error subscribing to " + ss[1] + ": " + err.Error()
+				txt = "Subscribed to " + strconv.Itoa(len(ss)-1) + " feeds"
+				for _, sss := range ss[1:] {
+					go s.Feeds.Add(sss, update.Message.Chat.ID)
 				}
 			}
-		case "unsub":
+		case "unsub", "/unsub", "unsubscribe", "/unsubscribe", "rm", "/rm":
 			if len(ss) < 2 {
 				txt = "Please provide a url to unsubscribe from"
 			} else {
@@ -133,10 +148,10 @@ func (s *Server) Respond() {
 					txt = "Error unsubscribing from " + ss[1] + ": " + err.Error()
 				}
 			}
-		case "list":
+		case "list", "/list", "show", "/show":
 			subs := s.Feeds.List(update.Message.Chat.ID)
 			txt = "You are subscribed to:\n\n" + strings.Join(subs, "\n")
-		case "update":
+		case "update", "/update":
 			go s.update()
 			txt = "update started"
 		case "/start", "/help", "help":
@@ -153,7 +168,7 @@ help: show this message`
 		}
 
 		log.Debugln("respond sending message")
-		_, err = s.bot.Send(tapi.NewMessage(update.Message.Chat.ID, txt))
+		_, err = s.Bot.Send(tapi.NewMessage(update.Message.Chat.ID, txt))
 		if err != nil {
 			log.Errorln("respond send msg", err)
 		}
@@ -168,11 +183,12 @@ func (s *Server) Update(d time.Duration) {
 }
 
 func (s *Server) update() {
+	log.Infoln("updating")
 	var wg sync.WaitGroup
 	sends := make(chan tapi.MessageConfig, 16)
 	go func() {
 		for m := range sends {
-			_, err := s.bot.Send(m)
+			_, err := s.Bot.Send(m)
 			if err != nil {
 				log.Errorln("update sends", err)
 			}
@@ -188,11 +204,14 @@ func (s *Server) update() {
 				return
 			}
 			for cid := range feed.Chats {
-				for i := range f.Items {
-					it := f.Items[len(f.Items)-1-i]
+				for _, it := range f.Items {
 					a := NewArticleKey(it.Title, it.PublishedParsed, it.UpdatedParsed)
+					if it.PublishedParsed.Before(time.Now().Add(-192 * time.Hour)) {
+						s.Seens[cid].Mark(a)
+					}
 					if !s.Seens[cid].Seen(a) {
 						sends <- tapi.NewMessage(cid, it.Title+"\n"+it.Link)
+						s.Seens[cid].Mark(a)
 					}
 				}
 			}
@@ -223,6 +242,7 @@ func (f Feeds) Add(url string, cid int64) error {
 	if _, ok := f[url]; !ok {
 		err := f.New(url)
 		if err != nil {
+			log.Errorln("feeds add", err)
 			return fmt.Errorf("feeds add %v", err)
 		}
 	}
