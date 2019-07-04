@@ -134,6 +134,7 @@ func (s *Server) Respond() {
 				txt = "Please provide a url to subscribe to"
 			} else {
 				txt = "Subscribed to " + strconv.Itoa(len(ss)-1) + " feeds"
+				s.Seens.CheckSeen(update.Message.Chat.ID)
 				for _, sss := range ss[1:] {
 					go s.Feeds.Add(sss, update.Message.Chat.ID)
 				}
@@ -225,7 +226,7 @@ func (s *Server) update() {
 type Feeds map[string]*Feed
 
 func NewFeeds() Feeds {
-	return make(map[string]*Feed)
+	return make(Feeds)
 }
 
 // New creates a new feed
@@ -312,7 +313,12 @@ func NewArticleKey(title string, ts, up *time.Time) ArticleKey {
 type Seens map[int64]Seen
 
 func NewSeens() Seens {
-	return make(map[int64]Seen)
+	return make(Seens)
+}
+func (s Seens) CheckSeen(cid int64) {
+	if s[cid] == nil {
+		s[cid] = make(Seen)
+	}
 }
 
 // Seen is a set of articles a chat has already seen
