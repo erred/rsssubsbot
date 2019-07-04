@@ -87,6 +87,7 @@ func NewServer(token string) (*Server, error) {
 	}
 	r, err := store.Bucket(Bucket).Object(fn).NewReader(context.Background())
 	if err == nil {
+		defer r.Close()
 		s := &Server{}
 		log.Debugln("NewServer restoring from storage", Bucket, fn)
 		err = json.NewDecoder(r).Decode(s)
@@ -116,6 +117,7 @@ func (s *Server) Export() {
 	fn := "rsssubsbot.json"
 	log.Debugln("Export to", Bucket, fn)
 	w := s.store.Bucket(Bucket).Object(fn).NewWriter(context.Background())
+	defer w.Close()
 	err := json.NewEncoder(w).Encode(s)
 	if err != nil {
 		log.Errorln("Export to bucket", err)
