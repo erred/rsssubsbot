@@ -109,6 +109,7 @@ func (s *Server) Export() {
 	if err != nil {
 		log.Errorln("Export to bucket", err)
 	}
+	log.Infoln("exported to bucket", Bucket, fn)
 }
 
 func (s *Server) Respond() {
@@ -118,7 +119,6 @@ func (s *Server) Respond() {
 		log.Fatal("Respond get updates", err)
 	}
 	for update := range updates {
-		log.Debugln("respond processing new message")
 		if update.Message == nil {
 			continue
 		}
@@ -128,9 +128,10 @@ func (s *Server) Respond() {
 			continue
 		}
 
+		log.Debugln("Respond processing message")
 		var txt string
-		switch strings.ToLower(ss[0]) {
-		case "sub", "/sub", "subscribe", "/subscribe", "add", "/add":
+		switch strings.TrimPrefix(strings.ToLower(ss[0]), "/") {
+		case "sub", "subscribe", "add":
 			if len(ss) < 2 {
 				txt = "Please provide a url to subscribe to"
 			} else {
@@ -140,7 +141,7 @@ func (s *Server) Respond() {
 					go s.Feeds.Add(sss, update.Message.Chat.ID)
 				}
 			}
-		case "unsub", "/unsub", "unsubscribe", "/unsubscribe", "rm", "/rm":
+		case "unsub", "unsubscribe", "rm":
 			if len(ss) < 2 {
 				txt = "Please provide a url to unsubscribe from"
 			} else {
@@ -150,13 +151,17 @@ func (s *Server) Respond() {
 					txt = "Error unsubscribing from " + ss[1] + ": " + err.Error()
 				}
 			}
-		case "list", "/list", "show", "/show":
+		case "list", "show", "subs":
 			subs := s.Feeds.List(update.Message.Chat.ID)
 			txt = "You are subscribed to:\n\n" + strings.Join(subs, "\n")
-		case "update", "/update":
-			go s.update()
-			txt = "update started"
-		case "/start", "/help", "help":
+		case "update":
+			if update.Message.From.UserName == "seankhliao" {
+				go s.update()
+				txt = "update started"
+			} else {
+				txt = update.Message.From.UserName + " is not authorized to update"
+			}
+		case "start", "help":
 			fallthrough
 		default:
 			txt = `Hello
@@ -165,11 +170,10 @@ here's what I can do:
 
 sub <url>: subscribe to rss feed @ url
 unsub <url>: unsubscribe to rss feed @url
-list: show subscriptions
+subs: show subscriptions
 help: show this message`
 		}
 
-		log.Debugln("respond sending message")
 		_, err = s.Bot.Send(tapi.NewMessage(update.Message.Chat.ID, txt))
 		if err != nil {
 			log.Errorln("respond send msg", err)
@@ -186,6 +190,7 @@ func (s *Server) Update(d time.Duration) {
 
 func (s *Server) update() {
 	log.Infoln("updating")
+	defer log.Infoln("Done updating")
 	var wg sync.WaitGroup
 	sends := make(chan tapi.MessageConfig, 16)
 	go func() {
