@@ -48,7 +48,6 @@ func init() {
 }
 
 func main() {
-	log.Debugln("main creating new server")
 	s, err := NewServer(APIToken)
 	if err != nil {
 		log.Fatal("main new server", err)
@@ -80,26 +79,31 @@ type Server struct {
 }
 
 func NewServer(token string) (*Server, error) {
+	log.Debugln("NewServer creating")
 	fn := "rsssubsbot.json"
 	store, err := storage.NewClient(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("NewServer storage client")
+		return nil, fmt.Errorf("NewServer storage client: %v", err)
 	}
 	r, err := store.Bucket(Bucket).Object(fn).NewReader(context.Background())
 	if err == nil {
 		s := &Server{}
+		log.Debugln("NewServer restoring from storage", Bucket, fn)
 		err = json.NewDecoder(r).Decode(s)
 		if err == nil {
+			log.Infoln("NewServer restored from storage")
 			s.store = store
 			return s, nil
 		}
-		log.Debugln("NewServer decode", err)
+		log.Debugln("NewServer restoring decode", err)
 	}
 	log.Debugln("NewServer reader", err)
+	log.Debugln("NewServer new tapi bot from token")
 	bot, err := tapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("NewServer new bot %v", err)
 	}
+	log.Debugln("NewServer created new bot")
 	return &Server{
 		Bot:   bot,
 		store: store,
@@ -109,18 +113,19 @@ func NewServer(token string) (*Server, error) {
 }
 
 func (s *Server) Export() {
-	log.Debugln("Exporting")
 	fn := "rsssubsbot.json"
+	log.Debugln("Export to", Bucket, fn)
 	w := s.store.Bucket(Bucket).Object(fn).NewWriter(context.Background())
 	err := json.NewEncoder(w).Encode(s)
 	if err != nil {
 		log.Errorln("Export to bucket", err)
+		return
 	}
-	log.Infoln("exported to bucket", Bucket, fn)
+	log.Infoln("Export done")
 }
 
 func (s *Server) Respond() {
-	log.Debugln("starting respond")
+	log.Debugln("Respond starting")
 	updates, err := s.Bot.GetUpdatesChan(tapi.NewUpdate(0))
 	if err != nil {
 		log.Fatal("Respond get updates", err)
@@ -183,39 +188,45 @@ help: show this message`
 
 		_, err = s.Bot.Send(tapi.NewMessage(update.Message.Chat.ID, txt))
 		if err != nil {
-			log.Errorln("respond send msg", err)
+			log.Errorln("Respond send msg", err)
 		}
 	}
 }
 
 func (s *Server) update() {
-	log.Infoln("updating")
-	defer log.Infoln("Done updating")
+	log.Debugln("update starting")
+	defer log.Infoln("update done")
+
 	var wg sync.WaitGroup
 	sends := make(chan tapi.MessageConfig, 16)
+
 	go func() {
 		for m := range sends {
 			_, err := s.Bot.Send(m)
 			if err != nil {
-				log.Errorln("update sends", err)
+				log.Errorln("update 1 sends", err)
 			}
 		}
 	}()
 
+	t := time.Now().Add(-192 * time.Hour)
+	ts := NewArticleKey("", &t, nil)
 	type h struct {
 		a  ArticleKey
 		it *gofeed.Item
 	}
-	t := time.Now().Add(-192 * time.Hour)
-	ts := NewArticleKey("", &t, nil)
+
 	for url, feed := range s.Feeds {
 		wg.Add(1)
 		go func(url string, feed *Feed) {
+			defer wg.Done()
+
 			f, err := gofeed.NewParser().ParseURL(url)
 			if err != nil {
-				log.Errorln("update feed parseurl", feed.Title, err)
+				log.Errorln("update 2 feed parseurl", url, err)
 				return
 			}
+
 			for cid := range feed.Chats {
 				var q []h
 				for _, it := range f.Items {
@@ -236,6 +247,7 @@ func (s *Server) update() {
 			}
 		}(url, feed)
 	}
+
 	wg.Wait()
 	close(sends)
 }
