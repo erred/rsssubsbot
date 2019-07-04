@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -196,6 +197,12 @@ func (s *Server) update() {
 		}
 	}()
 
+	type h struct {
+		a  ArticleKey
+		it *gofeed.Item
+	}
+	t := time.Now().Add(-192 * time.Hour)
+	ts := NewArticleKey("", &t, nil)
 	for url, feed := range s.Feeds {
 		wg.Add(1)
 		go func(url string, feed *Feed) {
@@ -205,15 +212,21 @@ func (s *Server) update() {
 				return
 			}
 			for cid := range feed.Chats {
+				var q []h
 				for _, it := range f.Items {
 					a := NewArticleKey(it.Title, it.PublishedParsed, it.UpdatedParsed)
-					if it.PublishedParsed.Before(time.Now().Add(-192 * time.Hour)) {
-						s.Seens[cid].Mark(a)
-					}
 					if !s.Seens[cid].Seen(a) {
-						sends <- tapi.NewMessage(cid, it.Title+"\n"+it.Link)
 						s.Seens[cid].Mark(a)
+						if a > ts {
+							q = append(q, h{a, it})
+						}
 					}
+				}
+				sort.Slice(q, func(i, j int) bool {
+					return q[i].a < q[j].a
+				})
+				for _, it := range q {
+					sends <- tapi.NewMessage(cid, it.it.Link)
 				}
 			}
 		}(url, feed)
