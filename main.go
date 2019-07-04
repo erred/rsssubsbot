@@ -55,8 +55,15 @@ func main() {
 	}
 	defer s.Export()
 
-	go s.Update(15 * time.Minute)
 	go s.Respond()
+	go func(d time.Duration) {
+		s.update()
+		s.Export()
+		for range time.NewTicker(d).C {
+			s.update()
+			s.Export()
+		}
+	}(15 * time.Minute)
 
 	sigs := make(chan os.Signal)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGKILL)
@@ -178,13 +185,6 @@ help: show this message`
 		if err != nil {
 			log.Errorln("respond send msg", err)
 		}
-	}
-}
-
-func (s *Server) Update(d time.Duration) {
-	s.update()
-	for range time.NewTicker(d).C {
-		s.update()
 	}
 }
 
