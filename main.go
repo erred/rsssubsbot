@@ -71,7 +71,7 @@ func main() {
 }
 
 type Server struct {
-	Bot   *tapi.BotAPI
+	bot   *tapi.BotAPI
 	store *storage.Client
 
 	Feeds
@@ -81,36 +81,36 @@ type Server struct {
 func NewServer(token string) (*Server, error) {
 	log.Debugln("NewServer creating")
 	fn := "rsssubsbot.json"
-	store, err := storage.NewClient(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("NewServer storage client: %v", err)
-	}
-	r, err := store.Bucket(Bucket).Object(fn).NewReader(context.Background())
-	if err == nil {
-		defer r.Close()
-		s := &Server{}
-		log.Debugln("NewServer restoring from storage", Bucket, fn)
-		err = json.NewDecoder(r).Decode(s)
-		if err == nil {
-			log.Infoln("NewServer restored from storage")
-			s.store = store
-			return s, nil
-		}
-		log.Debugln("NewServer restoring decode", err)
-	}
-	log.Debugln("NewServer reader", err)
-	log.Debugln("NewServer new tapi bot from token")
+
+	log.Debugln("NewServer creating telegram bot")
 	bot, err := tapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("NewServer new bot %v", err)
 	}
-	log.Debugln("NewServer created new bot")
-	return &Server{
-		Bot:   bot,
+
+	log.Debugln("NewServer creating storage client")
+	store, err := storage.NewClient(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("NewServer storage client: %v", err)
+	}
+
+	s := &Server{
+		bot:   bot,
 		store: store,
 		Feeds: NewFeeds(),
 		Seens: NewSeens(),
-	}, nil
+	}
+	log.Debugln("NewServer retrieving from storage")
+	r, err := store.Bucket(Bucket).Object(fn).NewReader(context.Background())
+	if err == nil {
+		defer r.Close()
+		log.Debugln("NewServer decoding from storage")
+		err = json.NewDecoder(r).Decode(s)
+		if err != nil {
+			log.Debugln("Newserver decode from storage", err)
+		}
+	}
+	return s, nil
 }
 
 func (s *Server) Export() {
@@ -128,7 +128,7 @@ func (s *Server) Export() {
 
 func (s *Server) Respond() {
 	log.Debugln("Respond starting")
-	updates, err := s.Bot.GetUpdatesChan(tapi.NewUpdate(0))
+	updates, err := s.bot.GetUpdatesChan(tapi.NewUpdate(0))
 	if err != nil {
 		log.Fatal("Respond get updates", err)
 	}
@@ -188,7 +188,7 @@ subs: show subscriptions
 help: show this message`
 		}
 
-		_, err = s.Bot.Send(tapi.NewMessage(update.Message.Chat.ID, txt))
+		_, err = s.bot.Send(tapi.NewMessage(update.Message.Chat.ID, txt))
 		if err != nil {
 			log.Errorln("Respond send msg", err)
 		}
@@ -204,7 +204,7 @@ func (s *Server) update() {
 
 	go func() {
 		for m := range sends {
-			_, err := s.Bot.Send(m)
+			_, err := s.bot.Send(m)
 			if err != nil {
 				log.Errorln("update 1 sends", err)
 			}
