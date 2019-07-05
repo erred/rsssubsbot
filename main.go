@@ -88,10 +88,7 @@ func NewServer(token string) (*Server, error) {
 	r, err := store.Bucket(Bucket).Object(fn).NewReader(context.Background())
 	if err == nil {
 		defer r.Close()
-		s := &Server{
-			Feeds: NewFeeds(),
-			Seens: NewSeens(),
-		}
+		s := &Server{}
 		log.Debugln("NewServer restoring from storage", Bucket, fn)
 		err = json.NewDecoder(r).Decode(s)
 		if err == nil {
@@ -380,6 +377,9 @@ func (us Seen) UnmarshalJSON(data []byte) error {
 	var arr []ArticleKey
 	if err := json.Unmarshal(data, &arr); err != nil {
 		return err
+	}
+	if us == nil {
+		us = make(Seen)
 	}
 	for _, a := range arr {
 		us[a] = struct{}{}
