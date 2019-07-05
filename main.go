@@ -355,10 +355,10 @@ func (s Seens) CheckSeen(cid int64) {
 // MarkSeen marks an article as seen
 // returns if it was originally seen
 func (s Seens) MarkSeen(cid int64, a ArticleKey) bool {
-	if _, ok := s[cid]; !ok {
+	var ok bool
+	if s[cid] == nil {
 		s[cid] = make(Seen)
 	}
-	var ok bool
 	if _, ok = s[cid][a]; !ok {
 		s[cid][a] = struct{}{}
 	}
