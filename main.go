@@ -88,7 +88,10 @@ func NewServer(token string) (*Server, error) {
 	r, err := store.Bucket(Bucket).Object(fn).NewReader(context.Background())
 	if err == nil {
 		defer r.Close()
-		s := &Server{}
+		s := &Server{
+			Feeds: NewFeeds(),
+			Seens: NewSeens(),
+		}
 		log.Debugln("NewServer restoring from storage", Bucket, fn)
 		err = json.NewDecoder(r).Decode(s)
 		if err == nil {
