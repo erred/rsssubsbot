@@ -233,8 +233,7 @@ func (s *Server) update() {
 				var q []h
 				for _, it := range f.Items {
 					a := NewArticleKey(it.Title, it.PublishedParsed, it.UpdatedParsed)
-					if !s.Seens[cid].Seen(a) {
-						s.Seens[cid].Mark(a)
+					if !s.Seens.MarkSeen(cid, a) {
 						if a > ts {
 							q = append(q, h{a, it})
 						}
@@ -353,19 +352,22 @@ func (s Seens) CheckSeen(cid int64) {
 	}
 }
 
-// Seen is a set of articles a chat has already seen
-type Seen map[ArticleKey]struct{}
-
-// Seen checks if an article has been seen before
-func (us Seen) Seen(a ArticleKey) bool {
-	_, ok := us[a]
+// MarkSeen marks an article as seen
+// returns if it was originally seen
+func (s Seens) MarkSeen(cid int64, a ArticleKey) bool {
+	if _, ok := s[cid]; !ok {
+		s[cid] = make(Seen)
+	}
+	var ok bool
+	if _, ok = s[cid][a]; !ok {
+		s[cid][a] = struct{}{}
+	}
 	return ok
 }
 
-// Mark marks an article as seen
-func (us Seen) Mark(a ArticleKey) {
-	us[a] = struct{}{}
-}
+// Seen is a set of articles a chat has already seen
+type Seen map[ArticleKey]struct{}
+
 func (us Seen) MarshalJSON() ([]byte, error) {
 	arr := make([]ArticleKey, 0, len(us))
 	for a := range us {
