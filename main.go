@@ -367,24 +367,3 @@ func (s Seens) MarkSeen(cid int64, a ArticleKey) bool {
 
 // Seen is a set of articles a chat has already seen
 type Seen map[ArticleKey]struct{}
-
-func (us Seen) MarshalJSON() ([]byte, error) {
-	arr := make([]ArticleKey, 0, len(us))
-	for a := range us {
-		arr = append(arr, a)
-	}
-	return json.Marshal(arr)
-}
-func (us Seen) UnmarshalJSON(data []byte) error {
-	var arr []ArticleKey
-	if err := json.Unmarshal(data, &arr); err != nil {
-		return err
-	}
-	if us == nil {
-		us = make(Seen)
-	}
-	for _, a := range arr {
-		us[a] = struct{}{}
-	}
-	return nil
-}
