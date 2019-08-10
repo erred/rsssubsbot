@@ -1,4 +1,4 @@
-module github.com/seankhliao/rsssubsbot
+module seankhliao.com/rsssubsbot
 
 go 1.12
 
